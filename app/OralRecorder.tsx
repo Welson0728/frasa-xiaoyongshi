@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { transcriptIsExact, transcriptScore } from "./speechAssessment";
 
 type OralRecorderProps = {
   target: string;
   modelAudio: string;
   onSuccess: () => void;
+  onResult?: (passed: boolean) => void;
+  onReset?: () => void;
 };
 
 type SpeechAssessment = {
@@ -14,6 +17,7 @@ type SpeechAssessment = {
   accuracy?: number;
   fluency?: number;
   feedback?: string;
+  transcript?: string;
 };
 
 type BrowserSpeechResult = {
@@ -55,52 +59,7 @@ declare global {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
 
-function normalizedWords(value: string): string[] {
-  return value
-    .toLocaleLowerCase("ms-MY")
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-}
-
-function editDistance(left: readonly string[], right: readonly string[]): number {
-  const row = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    let diagonal = row[0];
-    row[0] = leftIndex;
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      const previous = row[rightIndex];
-      row[rightIndex] = left[leftIndex - 1] === right[rightIndex - 1]
-        ? diagonal
-        : Math.min(diagonal, row[rightIndex - 1], previous) + 1;
-      diagonal = previous;
-    }
-  }
-  return row[right.length];
-}
-
-function transcriptScore(target: string, transcript: string): number {
-  const expected = normalizedWords(target);
-  const heard = normalizedWords(transcript);
-  if (expected.length === 0 || heard.length === 0) return 0;
-  const distanceScore = Math.max(0, 1 - editDistance(expected, heard) / Math.max(expected.length, heard.length));
-  const remaining = [...heard];
-  let matched = 0;
-  expected.forEach((word) => {
-    const index = remaining.indexOf(word);
-    if (index >= 0) {
-      matched += 1;
-      remaining.splice(index, 1);
-    }
-  });
-  const coverage = matched / expected.length;
-  return Math.round((distanceScore * 0.72 + coverage * 0.28) * 100);
-}
-
-export default function OralRecorder({ target, modelAudio, onSuccess }: OralRecorderProps) {
+export default function OralRecorder({ target, modelAudio, onSuccess, onResult, onReset }: OralRecorderProps) {
   const modelRef = useRef<HTMLAudioElement>(null);
   const recordingRef = useRef<HTMLAudioElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -220,8 +179,10 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
   };
 
   const startRecording = async () => {
+    onReset?.();
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setMessage("Peranti ini belum menyokong rakaman suara.");
+      onResult?.(false);
       return;
     }
 
@@ -262,9 +223,10 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
         } catch {
           recognitionRef.current = null;
         }
-        if (blob.size <= 500) {
+        if (blob.size === 0) {
           setStatus("retry");
-          setMessage("Rakaman terlalu pendek. Cuba baca sekali lagi.");
+          setMessage("Rakaman kosong. Pastikan mikrofon dibenarkan dan cuba lagi.");
+          onResult?.(false);
           setLevel(0.08);
           stream.getTracks().forEach((track) => track.stop());
           void audioContextRef.current?.close();
@@ -283,7 +245,8 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
         void audioContextRef.current?.close();
         audioContextRef.current = null;
       };
-      recorder.start(250);
+      if (recorder.mimeType.includes("mp4")) recorder.start();
+      else recorder.start(250);
       startSpeechRecognition();
       watchLevel(stream);
       setStatus("recording");
@@ -291,6 +254,7 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
       stopTimerRef.current = setTimeout(() => stopRecording(), 12000);
     } catch {
       setMessage("Benarkan mikrofon untuk merakam bacaan.");
+      onResult?.(false);
     }
   };
 
@@ -299,7 +263,16 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
       clearTimeout(stopTimerRef.current);
       stopTimerRef.current = null;
     }
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    if (recorderRef.current?.state === "recording") {
+      if (!recorderRef.current.mimeType.includes("mp4")) {
+        try {
+          recorderRef.current.requestData();
+        } catch {
+          // Some browsers emit the final chunk only when stop() is called.
+        }
+      }
+      recorderRef.current.stop();
+    }
   };
 
   const retry = () => {
@@ -312,6 +285,7 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
     setRecordingPlaying(false);
     setStatus("idle");
     setMessage("");
+    onReset?.();
   };
 
   const assess = async () => {
@@ -326,16 +300,19 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
             ? "Peranti ini tidak menyediakan semakan suara automatik. Cuba pada Chrome atau Edge yang terkini."
             : "Saya belum dapat mengenal bacaan itu. Dengar contoh dan rakam semula dengan lebih jelas.",
         );
+        onResult?.(false);
         return;
       }
       const score = transcriptScore(target, transcript);
-      if (score >= 72) {
+      if (transcriptIsExact(target, transcript)) {
         setStatus("passed");
-        setMessage(`Bagus! Bacaan sepadan (${score}%).`);
+        setMessage("Hebat! Semua perkataan dibaca dengan tepat (100%).");
+        onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
-        setMessage(`Saya dengar “${transcript}”. Belum sepadan (${score}%). Cuba baca ayat yang tertera.`);
+        setMessage(`Saya dengar “${transcript}”. Ketepatan ${score}%, tetapi semua perkataan mesti betul. Cuba lagi.`);
+        onResult?.(false);
       }
       return;
     }
@@ -351,17 +328,23 @@ export default function OralRecorder({ target, modelAudio, onSuccess }: OralReco
       const response = await fetch(`${ASSESS_API_BASE}/speech`, { method: "POST", body: form });
       if (!response.ok) throw new Error("assessment unavailable");
       const result = (await response.json()) as SpeechAssessment;
-      if (result.passed) {
+      const exact = result.transcript
+        ? transcriptIsExact(target, result.transcript)
+        : result.accuracy === 100;
+      if (result.passed && exact) {
         setStatus("passed");
-        setMessage(result.feedback ?? "Bagus! Bacaan kamu jelas.");
+        setMessage(result.feedback ?? "Hebat! Semua perkataan dibaca dengan tepat (100%).");
+        onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
-        setMessage(result.feedback ?? "Dengar contoh dan cuba baca sekali lagi.");
+        setMessage(result.feedback ?? "Belum tepat. Semua perkataan mesti dibaca dengan betul dan mengikut urutan.");
+        onResult?.(false);
       }
     } catch {
       setStatus("retry");
       setMessage("Semakan automatik belum dapat digunakan. Cuba rakam semula sebentar lagi.");
+      onResult?.(false);
     }
   };
 

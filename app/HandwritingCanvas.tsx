@@ -14,7 +14,8 @@ type Assessment = {
 type HandwritingCanvasProps = {
   target: string;
   onSuccess: () => void;
-  onContinue: () => void;
+  onResult?: (passed: boolean) => void;
+  onReset?: () => void;
 };
 
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
@@ -37,13 +38,95 @@ function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke) {
   context.stroke();
 }
 
-export default function HandwritingCanvas({ target, onSuccess, onContinue }: HandwritingCanvasProps) {
+function drawInkMask(context: CanvasRenderingContext2D, strokes: Stroke[], lineWidth: number) {
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = lineWidth;
+  context.strokeStyle = "#000";
+  strokes.forEach((stroke) => drawStroke(context, stroke));
+}
+
+function drawTargetMask(
+  context: CanvasRenderingContext2D,
+  target: string,
+  width: number,
+  height: number,
+  fontSize: number,
+  expanded: boolean,
+) {
+  context.font = `950 ${fontSize}px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "#000";
+  if (expanded) {
+    context.lineJoin = "round";
+    context.lineWidth = Math.max(20, fontSize * 0.38);
+    context.strokeStyle = "#000";
+    context.strokeText(target, width / 2, height / 2 + 2);
+  }
+  context.fillText(target, width / 2, height / 2 + 2);
+}
+
+function tracingScore(target: string, strokes: Stroke[], width: number, height: number, fontSize: number) {
+  const makeCanvas = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+  };
+  const targetCore = makeCanvas();
+  const targetZone = makeCanvas();
+  const inkCore = makeCanvas();
+  const inkZone = makeCanvas();
+  drawTargetMask(targetCore.getContext("2d")!, target, width, height, fontSize, false);
+  drawTargetMask(targetZone.getContext("2d")!, target, width, height, fontSize, true);
+  drawInkMask(inkCore.getContext("2d")!, strokes, 7);
+  drawInkMask(inkZone.getContext("2d")!, strokes, Math.max(20, fontSize * 0.3));
+
+  const coreTargetPixels = targetCore.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const zoneTargetPixels = targetZone.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const coreInkPixels = inkCore.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const zoneInkPixels = inkZone.getContext("2d")!.getImageData(0, 0, width, height).data;
+  let inkTotal = 0;
+  let inkInside = 0;
+  let targetTotal = 0;
+  let targetCovered = 0;
+
+  for (let offset = 3; offset < coreInkPixels.length; offset += 4) {
+    const ink = coreInkPixels[offset] > 40;
+    const targetPixel = coreTargetPixels[offset] > 40;
+    if (ink) {
+      inkTotal += 1;
+      if (zoneTargetPixels[offset] > 40) inkInside += 1;
+    }
+    if (targetPixel) {
+      targetTotal += 1;
+      if (zoneInkPixels[offset] > 40) targetCovered += 1;
+    }
+  }
+
+  const precision = inkTotal > 0 ? inkInside / inkTotal : 0;
+  const coverage = targetTotal > 0 ? targetCovered / targetTotal : 0;
+  const score = Math.round((precision * 0.48 + coverage * 0.52) * 100);
+  return {
+    passed: inkTotal >= Math.max(70, targetTotal * 0.055)
+      && precision >= 0.52
+      && coverage >= 0.42
+      && score >= 54,
+    score,
+    precision,
+    coverage,
+  };
+}
+
+export default function HandwritingCanvas({ target, onSuccess, onResult, onReset }: HandwritingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const currentStroke = useRef<Stroke>([]);
   const drawing = useRef(false);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const [status, setStatus] = useState<"idle" | "checking" | "self" | "passed" | "retry">("idle");
+  const [status, setStatus] = useState<"idle" | "checking" | "passed" | "retry">("idle");
   const [message, setMessage] = useState("");
+  const guideFontSize = Math.max(30, Math.min(78, 260 / Math.max(3, target.length * 0.56)));
 
   const prepareContext = useCallback(() => {
     const canvas = canvasRef.current;
@@ -132,12 +215,14 @@ export default function HandwritingCanvas({ target, onSuccess, onContinue }: Han
     setStrokes([]);
     setStatus("idle");
     setMessage("");
+    onReset?.();
   };
 
   const undo = () => {
     setStrokes((existing) => existing.slice(0, -1));
     setStatus("idle");
     setMessage("");
+    onReset?.();
   };
 
   const checkWriting = async () => {
@@ -147,9 +232,21 @@ export default function HandwritingCanvas({ target, onSuccess, onContinue }: Han
       return;
     }
 
+    const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
+    const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height));
+    const localResult = tracingScore(target, strokes, width, height, guideFontSize);
+    if (!localResult.passed) {
+      setStatus("retry");
+      setMessage("Belum tepat. Cuba ikut bayang setiap huruf dengan lebih lengkap.");
+      onResult?.(false);
+      return;
+    }
+
     if (!ASSESS_API_BASE) {
-      setStatus("self");
-      setMessage("Bandingkan tulisan kamu dengan contoh.");
+      setStatus("passed");
+      setMessage(`Bagus! Bentuk tulisan sepadan (${localResult.score}%).`);
+      onResult?.(true);
+      onSuccess();
       return;
     }
 
@@ -166,14 +263,18 @@ export default function HandwritingCanvas({ target, onSuccess, onContinue }: Han
       if (result.passed) {
         setStatus("passed");
         setMessage(result.feedback ?? "Bagus! Tulisan kamu dapat dibaca.");
+        onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
         setMessage(result.feedback ?? "Cuba tulis sekali lagi dengan lebih jelas.");
+        onResult?.(false);
       }
     } catch {
-      setStatus("self");
-      setMessage("Semakan automatik belum dapat digunakan. Bandingkan dengan contoh.");
+      setStatus("passed");
+      setMessage(`Bagus! Bentuk tulisan sepadan (${localResult.score}%).`);
+      onResult?.(true);
+      onSuccess();
     }
   };
 
@@ -195,7 +296,7 @@ export default function HandwritingCanvas({ target, onSuccess, onContinue }: Han
           onPointerCancel={finishDrawing}
         />
         <div className="writing-lines" aria-hidden="true" />
-        <span className="ink-hint" aria-hidden="true">Tulis di sini</span>
+        <span className="ink-hint" style={{ fontSize: `${guideFontSize}px` }} aria-hidden="true">{target}</span>
       </div>
 
       <div className="tool-actions">
@@ -211,16 +312,6 @@ export default function HandwritingCanvas({ target, onSuccess, onContinue }: Han
       </div>
 
       {message && <p className={`tool-message ${status}`} role="status">{message}</p>}
-
-      {status === "self" && (
-        <div className="self-check-panel">
-          <div className="self-model">{target}</div>
-          <div className="self-check-actions">
-            <button className="mini-button" type="button" onClick={clear}>Cuba lagi</button>
-            <button className="primary-action compact" type="button" onClick={onContinue}>Soalan lain</button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

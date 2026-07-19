@@ -15,7 +15,7 @@ PDF buku teks mempunyai tujuh halaman awal sebelum halaman bercetak 1. Semua nom
 - DSKP mentafsir TP4 umum sebagai keupayaan bahasa yang baik, aplikasi pengetahuan secara berkesan, pengungkapan idea, pemikiran kritis dan pembelajaran kendiri pada tahap minimum (DSKP halaman PDF 29 / halaman dokumen 22).
 - Pernyataan khusus TP4 bagi mendengar dan bertutur, membaca serta menulis menggunakan frasa `pada tahap kukuh`.
 - Tiada tuntutan TP5 seperti huraian terperinci atau pengetahuan lebih kompleks, dan tiada tuntutan TP6 seperti prestasi cemerlang serta konsisten.
-- Soalan murid tidak memaparkan nombor soalan, jumlah soalan, unit, standard atau TP.
+- Latihan bebas tidak memaparkan nombor soalan atau jumlah soalan. Cabaran 10/15 soalan memaparkan kemajuan sesi dan markah sahaja; unit, standard dan TP tetap tidak dipaparkan.
 
 ## Liputan unit dan standard buku teks
 
@@ -50,17 +50,20 @@ Halaman penilaian dan pengayaan yang berada selepas sesetengah unit tidak diguna
 
 ## Saiz bank aktiviti
 
-| Jenis aktiviti | Bilangan benih disemak |
+| Jenis aktiviti | Bilangan aktiviti |
 |---|---:|
 | Dengar dan pilih | 96 |
+| Dengar dan susun | 96 |
+| Dengar dan isi | 96 |
+| Dengar dan padankan | 24 |
 | Baca dan faham | 48 |
 | Sistem bahasa | 48 |
 | Susun ayat | 48 |
 | Tulis pada skrin | 48 |
 | Bacaan lisan | 48 |
-| **Jumlah** | **336** |
+| **Jumlah** | **552** |
 
-Pemilihan berlaku secara rawak tanpa akaun dan tanpa penyimpanan kemajuan. Tiga puluh aktiviti terbaharu dikecualikan sementara daripada pilihan seterusnya untuk mengurangkan pengulangan dalam satu sesi. Tiada data disimpan apabila halaman ditutup atau dimuat semula.
+Pemilihan berlaku secara rawak tanpa akaun dan tanpa penyimpanan kemajuan. Tiga puluh aktiviti terbaharu dikecualikan sementara daripada pilihan seterusnya untuk mengurangkan pengulangan dalam satu sesi. Cabaran membina set seimbang 10 atau 15 soalan merentas enam kemahiran dan mengira markah cubaan pertama. Semua keadaan sesi berada dalam memori dan hilang apabila halaman ditutup atau dimuat semula.
 
 ## Kaedah kawalan mutu soalan
 
@@ -82,9 +85,9 @@ Buku teks pula mencetak aktiviti imlak sebagai `3.2.4(i)`, `3.2.4(ii)` dan `3.2.
 
 ## Suara dan rakaman
 
-- Semua 96 audio mendengar dan 48 audio contoh bacaan dihasilkan daripada suara tetap `ms-MY-YasminNeural`.
+- Semua 96 audio asas mendengar dan 48 audio contoh bacaan dihasilkan daripada suara tetap `ms-MY-YasminNeural`. Empat bentuk aktiviti mendengar menggunakan semula 96 fail asas tanpa menjana suara pelayar.
 - Kadar pertuturan ditetapkan pada `-15%` untuk murid Tahun 2.
 - Proses penerbitan tidak mempunyai suara gantian. Jika mana-mana satu daripada 144 fail gagal dijana atau saiznya tidak sah, binaan berhenti dan laman baharu tidak diterbitkan.
 - Nama teknikal suara tidak muncul pada skrin murid.
-- Rakaman bacaan kekal dalam memori pelayar semasa sesi. Penilaian sebutan automatik hanya diaktifkan apabila pelayan selamat menyediakan endpoint penilaian; kunci perkhidmatan tidak pernah dimasukkan ke GitHub Pages atau kod pelayar.
-- Tulisan dibuat terus pada kanvas dengan jari atau pen digital. Tiada input fail atau foto. Penilaian automatik menggunakan imej kanvas sementara hanya apabila endpoint selamat diaktifkan; aplikasi tidak mendakwa skor AI apabila endpoint itu belum tersedia.
+- Rakaman bacaan kekal dalam memori pelayar semasa sesi. Pengecaman pertuturan pelayar mesti menghasilkan urutan perkataan yang tepat sepenuhnya untuk lulus. Jika endpoint penilaian disambungkan, keputusan juga mesti membawa transkrip tepat atau ketepatan 100%; keputusan `passed` sahaja tidak mencukupi.
+- Tulisan dibuat terus pada kanvas dengan jari atau pen digital. Tiada input fail atau foto. Semakan tempatan membandingkan liputan dan ketepatan jejak terhadap bentuk sasaran; contengan di luar bentuk ditolak. Endpoint selamat boleh ditambah kemudian untuk OCR tulisan bebas.
