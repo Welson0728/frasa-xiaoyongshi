@@ -42,7 +42,7 @@ type BrowserSpeechRecognition = {
   onresult: ((event: BrowserSpeechEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
-  start: () => void;
+  start: (audioTrack?: MediaStreamTrack) => void;
   stop: () => void;
   abort: () => void;
 };
@@ -59,6 +59,37 @@ declare global {
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
 
+function joinedTranscript(current: string, next: string) {
+  return `${current} ${next}`.trim();
+}
+
+function supportsSpeechRecognitionTrack() {
+  const chromiumVersion = navigator.userAgent.match(/\b(?:Chrome|Chromium)\/(\d+)/i)?.[1];
+  return chromiumVersion ? Number(chromiumVersion) >= 135 : false;
+}
+
+function recognitionFailureMessage(error: string) {
+  if (error === "unsupported") {
+    return "Peranti ini belum menyediakan semakan suara automatik. Cuba pada Chrome atau Edge yang terkini.";
+  }
+  if (error === "not-allowed" || error === "service-not-allowed") {
+    return "Benarkan mikrofon dan pengecaman suara pada pelayar, kemudian cuba lagi.";
+  }
+  if (error === "audio-capture") {
+    return "Rakaman berjaya, tetapi semakan suara belum dapat menggunakan mikrofon. Buka dalam Chrome terkini dan cuba lagi.";
+  }
+  if (error === "network") {
+    return "Rakaman berjaya, tetapi semakan suara tidak dapat berhubung. Pastikan Internet stabil, kemudian cuba lagi.";
+  }
+  if (error === "language-not-supported") {
+    return "Pelayar ini belum menyokong semakan suara Bahasa Melayu.";
+  }
+  if (error === "no-speech") {
+    return "Rakaman berjaya, tetapi semakan suara belum mengesan perkataan. Mula membaca sebaik sahaja rakaman bermula.";
+  }
+  return "Semakan suara belum mendapat bacaan. Dengar rakaman dan cuba sekali lagi.";
+}
+
 export default function OralRecorder({ target, modelAudio, onSuccess, onResult, onReset }: OralRecorderProps) {
   const modelRef = useRef<HTMLAudioElement>(null);
   const recordingRef = useRef<HTMLAudioElement>(null);
@@ -69,7 +100,15 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
   const objectUrlRef = useRef<string>("");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const transcriptRef = useRef("");
+  const committedTranscriptRef = useRef("");
+  const interimTranscriptRef = useRef("");
   const recognitionErrorRef = useRef("");
+  const recognitionShouldRunRef = useRef(false);
+  const recognitionRestartBlockedRef = useRef(false);
+  const recognitionSessionRef = useRef(0);
+  const recognitionRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingStreamReleaseRef = useRef<(() => void) | null>(null);
   const analyserFrameRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,7 +122,13 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
   useEffect(() => {
     return () => {
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+      if (streamReleaseTimerRef.current) clearTimeout(streamReleaseTimerRef.current);
+      recognitionShouldRunRef.current = false;
+      recognitionSessionRef.current += 1;
       cancelAnimationFrame(analyserFrameRef.current);
+      pendingStreamReleaseRef.current?.();
+      pendingStreamReleaseRef.current = null;
       streamRef.current?.getTracks().forEach((track) => track.stop());
       recognitionRef.current?.abort();
       void audioContextRef.current?.close();
@@ -123,43 +168,106 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
     sample();
   };
 
-  const startSpeechRecognition = () => {
+  const releasePendingStream = () => {
+    if (streamReleaseTimerRef.current) {
+      clearTimeout(streamReleaseTimerRef.current);
+      streamReleaseTimerRef.current = null;
+    }
+    pendingStreamReleaseRef.current?.();
+    pendingStreamReleaseRef.current = null;
+  };
+
+  const startSpeechRecognition = (
+    audioTrack: MediaStreamTrack | null,
+    session = recognitionSessionRef.current,
+  ) => {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!Recognition) {
       recognitionErrorRef.current = "unsupported";
+      recognitionRestartBlockedRef.current = true;
       return;
     }
+    if (
+      session !== recognitionSessionRef.current
+      || !recognitionShouldRunRef.current
+      || (audioTrack && audioTrack.readyState !== "live")
+    ) return;
 
     try {
       const recognition = new Recognition();
-      let finalTranscript = "";
       recognition.lang = "ms-MY";
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
+        if (session !== recognitionSessionRef.current) return;
         let interimTranscript = "";
         for (let index = event.resultIndex; index < event.results.length; index += 1) {
           const part = event.results[index][0]?.transcript?.trim() ?? "";
           if (!part) continue;
           if (event.results[index].isFinal) {
-            finalTranscript = `${finalTranscript} ${part}`.trim();
+            committedTranscriptRef.current = joinedTranscript(committedTranscriptRef.current, part);
           } else {
-            interimTranscript = `${interimTranscript} ${part}`.trim();
+            interimTranscript = joinedTranscript(interimTranscript, part);
           }
         }
-        transcriptRef.current = `${finalTranscript} ${interimTranscript}`.trim();
+        interimTranscriptRef.current = interimTranscript;
+        transcriptRef.current = joinedTranscript(committedTranscriptRef.current, interimTranscript);
+        recognitionErrorRef.current = "";
+        recognitionRestartBlockedRef.current = false;
       };
       recognition.onerror = (event) => {
+        if (session !== recognitionSessionRef.current) return;
+        if (event.error === "aborted" && !recognitionShouldRunRef.current) return;
         recognitionErrorRef.current = event.error;
+        recognitionRestartBlockedRef.current = [
+          "audio-capture",
+          "language-not-supported",
+          "network",
+          "not-allowed",
+          "service-not-allowed",
+        ].includes(event.error);
       };
       recognition.onend = () => {
+        if (session !== recognitionSessionRef.current) {
+          if (recognitionRef.current === recognition) recognitionRef.current = null;
+          return;
+        }
+        if (interimTranscriptRef.current) {
+          committedTranscriptRef.current = joinedTranscript(
+            committedTranscriptRef.current,
+            interimTranscriptRef.current,
+          );
+          interimTranscriptRef.current = "";
+          transcriptRef.current = committedTranscriptRef.current;
+        }
         if (recognitionRef.current === recognition) recognitionRef.current = null;
+        if (
+          recognitionShouldRunRef.current
+          && !recognitionRestartBlockedRef.current
+          && (!audioTrack || audioTrack.readyState === "live")
+        ) {
+          recognitionRestartTimerRef.current = setTimeout(() => {
+            recognitionRestartTimerRef.current = null;
+            startSpeechRecognition(audioTrack, session);
+          }, 180);
+        } else if (!recognitionShouldRunRef.current) {
+          releasePendingStream();
+        }
       };
-      recognition.start();
       recognitionRef.current = recognition;
+      if (audioTrack && supportsSpeechRecognitionTrack()) {
+        try {
+          recognition.start(audioTrack);
+        } catch {
+          recognition.start();
+        }
+      } else {
+        recognition.start();
+      }
     } catch {
       recognitionErrorRef.current = "unavailable";
+      recognitionRestartBlockedRef.current = true;
       recognitionRef.current = null;
     }
   };
@@ -181,20 +289,36 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
   const startRecording = async () => {
     onReset?.();
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setStatus("retry");
       setMessage("Peranti ini belum menyokong rakaman suara.");
       onResult?.(false);
       return;
     }
 
+    recognitionShouldRunRef.current = false;
+    recognitionSessionRef.current += 1;
+    const session = recognitionSessionRef.current;
+    recognitionRestartBlockedRef.current = false;
+    if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+    recognitionRestartTimerRef.current = null;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    setStatus("checking");
+    setMessage("Sedang menyediakan mikrofon…");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (session !== recognitionSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       chunksRef.current = [];
       recordingBlobRef.current = null;
       transcriptRef.current = "";
+      committedTranscriptRef.current = "";
+      interimTranscriptRef.current = "";
       recognitionErrorRef.current = "";
-      recognitionRef.current?.abort();
-      recognitionRef.current = null;
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = "";
@@ -215,20 +339,32 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
       recorder.onstop = () => {
+        recognitionShouldRunRef.current = false;
+        if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+        recognitionRestartTimerRef.current = null;
         const mimeType = chunksRef.current[0]?.type || recorder.mimeType || preferred || "audio/webm";
         const blob = new Blob(chunksRef.current, { type: mimeType });
         recordingBlobRef.current = blob;
         try {
           recognitionRef.current?.stop();
         } catch {
-          recognitionRef.current = null;
+          // The recognition end event clears the reference after its final result.
+        }
+        const releaseStream = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          if (streamRef.current === stream) streamRef.current = null;
+        };
+        if (recognitionRef.current) {
+          pendingStreamReleaseRef.current = releaseStream;
+          streamReleaseTimerRef.current = setTimeout(releasePendingStream, 800);
+        } else {
+          releaseStream();
         }
         if (blob.size === 0) {
           setStatus("retry");
           setMessage("Rakaman kosong. Pastikan mikrofon dibenarkan dan cuba lagi.");
           onResult?.(false);
           setLevel(0.08);
-          stream.getTracks().forEach((track) => track.stop());
           void audioContextRef.current?.close();
           audioContextRef.current = null;
           return;
@@ -240,19 +376,26 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
         setMessage("Rakaman siap. Tekan Dengar rakaman, kemudian Semak bacaan.");
         setLevel(0.08);
         cancelAnimationFrame(analyserFrameRef.current);
-        stream.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
         void audioContextRef.current?.close();
         audioContextRef.current = null;
       };
       if (recorder.mimeType.includes("mp4")) recorder.start();
       else recorder.start(250);
-      startSpeechRecognition();
+      const audioTrack = stream.getAudioTracks()[0] ?? null;
+      recognitionShouldRunRef.current = true;
+      startSpeechRecognition(audioTrack, session);
       watchLevel(stream);
       setStatus("recording");
       setMessage("Baca dengan suara yang jelas.");
       stopTimerRef.current = setTimeout(() => stopRecording(), 12000);
     } catch {
+      if (session !== recognitionSessionRef.current) return;
+      recognitionShouldRunRef.current = false;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
+      setStatus("retry");
       setMessage("Benarkan mikrofon untuk merakam bacaan.");
       onResult?.(false);
     }
@@ -262,6 +405,16 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
     if (stopTimerRef.current) {
       clearTimeout(stopTimerRef.current);
       stopTimerRef.current = null;
+    }
+    recognitionShouldRunRef.current = false;
+    if (recognitionRestartTimerRef.current) {
+      clearTimeout(recognitionRestartTimerRef.current);
+      recognitionRestartTimerRef.current = null;
+    }
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      recognitionRef.current = null;
     }
     if (recorderRef.current?.state === "recording") {
       if (!recorderRef.current.mimeType.includes("mp4")) {
@@ -276,11 +429,21 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
   };
 
   const retry = () => {
+    recognitionShouldRunRef.current = false;
+    recognitionSessionRef.current += 1;
+    if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+    recognitionRestartTimerRef.current = null;
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    releasePendingStream();
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = "";
     recordingBlobRef.current = null;
     transcriptRef.current = "";
+    committedTranscriptRef.current = "";
+    interimTranscriptRef.current = "";
     recognitionErrorRef.current = "";
+    recognitionRestartBlockedRef.current = false;
     setRecordingUrl("");
     setRecordingPlaying(false);
     setStatus("idle");
@@ -292,14 +455,15 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
     const blob = recordingBlobRef.current;
     if (!recordingUrl || !blob) return;
     if (!ASSESS_API_BASE) {
+      if (recognitionRef.current) {
+        setStatus("checking");
+        setMessage("Sedang menyiapkan semakan suara…");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
       const transcript = transcriptRef.current.trim();
       if (!transcript) {
         setStatus("retry");
-        setMessage(
-          recognitionErrorRef.current === "unsupported"
-            ? "Peranti ini tidak menyediakan semakan suara automatik. Cuba pada Chrome atau Edge yang terkini."
-            : "Saya belum dapat mengenal bacaan itu. Dengar contoh dan rakam semula dengan lebih jelas.",
-        );
+        setMessage(recognitionFailureMessage(recognitionErrorRef.current));
         onResult?.(false);
         return;
       }
