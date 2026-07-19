@@ -48,6 +48,41 @@ export type GameQuestion = ChoiceQuestion | OrderQuestion | WriteQuestion | Oral
 
 const audioPath = (id: string) => `/audio/lessons/${id}.mp3`;
 
+const protectedSentenceTerms = [
+  "Guan Hong",
+  "Zhi Ying",
+  "Cikgu Wong",
+  "Zulkifli Haron",
+  "Pulau Redang",
+  "Pulau Pinang",
+  "Bukit Bendera",
+  "Jalur Gemilang",
+] as const;
+
+function cleanToken(value: string): string {
+  return value.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}-]+$/gu, "");
+}
+
+function sentenceTokens(sentence: string): string[] {
+  const words = sentence.split(/\s+/);
+  const tokens: string[] = [];
+  for (let index = 0; index < words.length;) {
+    const protectedTerm = protectedSentenceTerms.find((term) => {
+      const parts = term.split(" ");
+      return parts.every((part, offset) => cleanToken(words[index + offset] ?? "") === part);
+    });
+    if (protectedTerm) {
+      const length = protectedTerm.split(" ").length;
+      tokens.push(words.slice(index, index + length).join(" "));
+      index += length;
+    } else {
+      tokens.push(words[index]);
+      index += 1;
+    }
+  }
+  return tokens;
+}
+
 const sourceFor = (unit: (typeof curriculumUnits)[number]): QuestionSource => ({
   unit: unit.unit,
   theme: unit.theme,
@@ -105,7 +140,7 @@ for (const unit of curriculumUnits) {
       kind: "order",
       prompt: "Tekan perkataan mengikut susunan ayat yang betul.",
       answer,
-      words: answer.split(/\s+/),
+      words: sentenceTokens(answer),
     });
   });
 

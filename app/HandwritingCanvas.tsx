@@ -14,6 +14,7 @@ type Assessment = {
 type HandwritingCanvasProps = {
   target: string;
   onSuccess: () => void;
+  onContinue: () => void;
 };
 
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
@@ -36,7 +37,7 @@ function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke) {
   context.stroke();
 }
 
-export default function HandwritingCanvas({ target, onSuccess }: HandwritingCanvasProps) {
+export default function HandwritingCanvas({ target, onSuccess, onContinue }: HandwritingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const currentStroke = useRef<Stroke>([]);
   const drawing = useRef(false);
@@ -176,12 +177,6 @@ export default function HandwritingCanvas({ target, onSuccess }: HandwritingCanv
     }
   };
 
-  const confirmSelfCheck = () => {
-    setStatus("passed");
-    setMessage("Bagus kerana menyemak tulisan kamu!");
-    onSuccess();
-  };
-
   return (
     <div className="handwriting-tool">
       <div className="copy-model" aria-label={`Perkataan contoh: ${target}`}>
@@ -222,7 +217,7 @@ export default function HandwritingCanvas({ target, onSuccess }: HandwritingCanv
           <div className="self-model">{target}</div>
           <div className="self-check-actions">
             <button className="mini-button" type="button" onClick={clear}>Cuba lagi</button>
-            <button className="primary-action compact" type="button" onClick={confirmSelfCheck}>Sudah semak</button>
+            <button className="primary-action compact" type="button" onClick={onContinue}>Soalan lain</button>
           </div>
         </div>
       )}
