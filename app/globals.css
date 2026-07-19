@@ -1811,8 +1811,10 @@ audio:focus-visible {
 
 .copy-model strong {
   color: #243361;
+  font-family: "Andika", sans-serif;
   font-size: clamp(26px, 5vw, 38px);
-  font-weight: 900;
+  font-feature-settings: "ss01" 0, "ss13" 0;
+  font-weight: 700;
   letter-spacing: .02em;
 }
 
@@ -1874,9 +1876,10 @@ audio:focus-visible {
   left: 50%;
   top: 50%;
   color: rgba(77, 87, 142, 0.12);
-  font-family: "Trebuchet MS", "Arial Rounded MT Bold", sans-serif;
+  font-family: "Andika", sans-serif;
   font-size: clamp(30px, 7vw, 58px);
-  font-weight: 950;
+  font-feature-settings: "ss01" 0, "ss13" 0;
+  font-weight: 700;
   transform: translate(-50%, -50%);
   pointer-events: none;
   white-space: nowrap;
