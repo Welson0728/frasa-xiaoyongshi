@@ -4,7 +4,11 @@ Permainan web responsif Bahasa Melayu Tahun 2 yang meliputi kemahiran mendengar,
 
 Audio murid menggunakan fail MP3 tetap daripada satu suara `ms-MY-YasminNeural` pada kadar `-15%`. Nama suara hanya disimpan dalam dokumentasi pembinaan dan tidak dipaparkan dalam antara muka murid. Tiada suara pelayar atau suara gantian dibenarkan.
 
-Murid boleh memilih laluan `Dengar`, `Baca` atau `Tulis`, atau memilih cabaran campuran. Laluan `Baca` merakam suara, menyediakan butang main semula yang jelas dan menggunakan pengecaman pertuturan `ms-MY` pada pelayar yang menyokongnya. Bacaan yang tidak sepadan tidak boleh disahkan sendiri sebagai betul. Untuk penilaian pertuturan dan tulisan yang seragam pada semua pelayar, tetapkan `NEXT_PUBLIC_ASSESS_API_BASE` kepada perkhidmatan penilaian selamat; kunci API tidak boleh disimpan dalam laman GitHub Pages.
+Murid boleh memilih laluan `Dengar`, `Baca` atau `Tulis`, atau memilih cabaran campuran 10/15 soalan dengan markah dan pecahan kemahiran. Laluan `Dengar` merangkumi pilihan, susunan, isi tempat kosong dan padanan audio. Laluan `Baca` merakam suara, menyediakan butang main semula yang jelas dan menggunakan pengecaman pertuturan `ms-MY` pada pelayar yang menyokongnya. Semua perkataan mesti sepadan mengikut urutan untuk lulus; satu perkataan yang salah, tertinggal atau ditambah tidak boleh mendapat pengesahan 100%.
+
+Tulisan dinilai pada peranti dengan panduan jejak bentuk huruf. Contengan yang tidak meliputi bentuk sasaran ditolak dan maklum balas lulus/cuba lagi dipaparkan terus. Untuk penilaian pertuturan atau OCR tulisan yang seragam pada semua pelayar, `NEXT_PUBLIC_ASSESS_API_BASE` boleh disambungkan kepada perkhidmatan penilaian selamat; kunci API tidak boleh disimpan dalam laman GitHub Pages.
+
+Saluran laporan cabaran telah disediakan tetapi tidak aktif secara lalai. Tetapkan `NEXT_PUBLIC_REPORT_ENDPOINT` untuk menerima keputusan JSON dan/atau `NEXT_PUBLIC_REPORT_DASHBOARD_URL` untuk memaparkan pautan laporan. Tanpa tetapan itu, tiada butang laporan, akaun atau penyimpanan data dipaparkan kepada murid.
 
 Dalam aktiviti susun ayat, nama berbilang perkataan seperti `Guan Hong`, `Zhi Ying` dan `Cikgu Wong` dikekalkan sebagai satu token.
 

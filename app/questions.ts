@@ -31,6 +31,35 @@ export type OrderQuestion = BaseQuestion & {
   words: string[];
 };
 
+export type ListenOrderQuestion = BaseQuestion & {
+  kind: "listen-order";
+  prompt: string;
+  answer: string;
+  words: string[];
+  audio: string;
+};
+
+export type ListenFillQuestion = BaseQuestion & {
+  kind: "listen-fill";
+  prompt: string;
+  answer: string;
+  before: string;
+  after: string;
+  audio: string;
+};
+
+export type ListenMatchPair = {
+  id: string;
+  label: string;
+  audio: string;
+};
+
+export type ListenMatchQuestion = BaseQuestion & {
+  kind: "listen-match";
+  prompt: string;
+  pairs: ListenMatchPair[];
+};
+
 export type WriteQuestion = BaseQuestion & {
   kind: "write";
   prompt: string;
@@ -44,7 +73,14 @@ export type OralQuestion = BaseQuestion & {
   modelAudio: string;
 };
 
-export type GameQuestion = ChoiceQuestion | OrderQuestion | WriteQuestion | OralQuestion;
+export type GameQuestion =
+  | ChoiceQuestion
+  | OrderQuestion
+  | ListenOrderQuestion
+  | ListenFillQuestion
+  | ListenMatchQuestion
+  | WriteQuestion
+  | OralQuestion;
 
 const audioPath = (id: string) => `/audio/lessons/${id}.mp3`;
 
@@ -83,6 +119,22 @@ function sentenceTokens(sentence: string): string[] {
   return tokens;
 }
 
+function fillParts(sentence: string, seed: number): { answer: string; before: string; after: string } {
+  const tokens = sentenceTokens(sentence);
+  const cleanCandidates = tokens
+    .map((token, index) => ({ token, index }))
+    .filter(({ token }) => token === cleanToken(token) && cleanToken(token).length > 1);
+  const candidates = cleanCandidates.length > 0
+    ? cleanCandidates
+    : tokens.map((token, index) => ({ token, index }));
+  const selected = candidates[seed % candidates.length];
+  return {
+    answer: cleanToken(selected.token),
+    before: tokens.slice(0, selected.index).join(" "),
+    after: tokens.slice(selected.index + 1).join(" "),
+  };
+}
+
 const sourceFor = (unit: (typeof curriculumUnits)[number]): QuestionSource => ({
   unit: unit.unit,
   theme: unit.theme,
@@ -99,6 +151,7 @@ for (const unit of curriculumUnits) {
 
   unit.listen.forEach((answer, index) => {
     const id = `${unitId}-listen-${String(index + 1).padStart(2, "0")}`;
+    const audio = audioPath(id);
     bank.push({
       ...source,
       id,
@@ -107,8 +160,39 @@ for (const unit of curriculumUnits) {
       prompt: "Dengar dengan teliti. Pilih yang kamu dengar.",
       answer,
       options: unit.listen,
-      audio: audioPath(id),
+      audio,
     });
+    bank.push({
+      ...source,
+      id: `${id}-order`,
+      mode: "listen",
+      kind: "listen-order",
+      prompt: "Dengar, kemudian susun perkataan menjadi ayat yang betul.",
+      answer,
+      words: sentenceTokens(answer),
+      audio,
+    });
+    bank.push({
+      ...source,
+      id: `${id}-fill`,
+      mode: "listen",
+      kind: "listen-fill",
+      prompt: "Dengar, kemudian isi perkataan yang hilang.",
+      ...fillParts(answer, unit.unit + index),
+      audio,
+    });
+  });
+
+  bank.push({
+    ...source,
+    id: `${unitId}-listen-match`,
+    mode: "listen",
+    kind: "listen-match",
+    prompt: "Dengar setiap suara dan padankan dengan ayat yang betul.",
+    pairs: unit.listen.map((label, index) => {
+      const audioId = `${unitId}-listen-${String(index + 1).padStart(2, "0")}`;
+      return { id: audioId, label, audio: audioPath(audioId) };
+    }),
   });
 
   unit.reading.questions.forEach((question, index) => {
@@ -150,7 +234,7 @@ for (const unit of curriculumUnits) {
       id: `${unitId}-write-${String(index + 1).padStart(2, "0")}`,
       mode: "write",
       kind: "write",
-      prompt: "Tulis perkataan ini pada ruang di bawah.",
+      prompt: "Ikut bayang huruf dan tulis perkataan ini pada skrin.",
       target,
     });
   });
@@ -205,12 +289,20 @@ export const generatedBankStats = questionBank.reduce<Record<GameMode | "total",
   { listen: 0, read: 0, language: 0, order: 0, write: 0, oral: 0, total: 0 },
 );
 
-export const audioManifest = questionBank.flatMap((question) => {
+const collectedAudio = questionBank.flatMap((question) => {
   if (question.kind === "choice" && question.audio) {
     return [{ id: question.id, text: question.answer, file: question.audio }];
   }
   if (question.kind === "oral") {
     return [{ id: question.id, text: question.target, file: question.modelAudio }];
   }
+  if (question.kind === "listen-order" || question.kind === "listen-fill") {
+    return [{ id: question.id, text: question.answer, file: question.audio }];
+  }
+  if (question.kind === "listen-match") {
+    return question.pairs.map((pair) => ({ id: pair.id, text: pair.label, file: pair.audio }));
+  }
   return [];
 });
+
+export const audioManifest = [...new Map(collectedAudio.map((item) => [item.file, item])).values()];

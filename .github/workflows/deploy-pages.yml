@@ -52,7 +52,7 @@ jobs:
       - name: Generate and verify fixed lesson audio
         run: |
           python -m pip install edge-tts==7.2.8
-          npx tsc app/content.ts app/questions.ts --target ES2020 --module commonjs --moduleResolution node --outDir /tmp/jom-main-audio --skipLibCheck --esModuleInterop --isolatedModules false
+          npx tsc app/content.ts app/questions.ts app/speechAssessment.ts --target ES2020 --module commonjs --moduleResolution node --outDir /tmp/jom-main-audio --skipLibCheck --esModuleInterop --isolatedModules false
           node scripts/validate-content.cjs
           node scripts/generate-audio.mjs
 
