@@ -21,10 +21,10 @@ type HandwritingCanvasProps = {
 };
 
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
-const TARGET_FONT_FAMILY = '"Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
+const TARGET_FONT_FAMILY = '"Andika", sans-serif';
 
 function targetFont(fontSize: number) {
-  return `950 ${fontSize}px ${TARGET_FONT_FAMILY}`;
+  return `700 ${fontSize}px ${TARGET_FONT_FAMILY}`;
 }
 
 function fittedTargetFontSize(context: CanvasRenderingContext2D, target: string, width: number) {
@@ -246,6 +246,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    let active = true;
 
     const resize = () => {
       const ratio = window.devicePixelRatio || 1;
@@ -260,9 +261,15 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
     };
 
     resize();
+    void document.fonts?.load(`700 104px ${TARGET_FONT_FAMILY}`, target).then(() => {
+      if (active) resize();
+    });
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
-    return () => observer.disconnect();
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
   }, [redraw, target]);
 
   useEffect(() => {
