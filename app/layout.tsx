@@ -4,8 +4,8 @@ import "./globals.css";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {
-  title: "Frasa 小勇士",
-  description: "Permainan web Bahasa Melayu Tahun 2 untuk belajar frasa.",
+  title: "Jom Main Bahasa!",
+  description: "Permainan pembelajaran Bahasa Melayu Tahun 2 untuk mendengar, membaca, menulis dan bertutur.",
   other: {
     "codex-preview": "development",
   },
