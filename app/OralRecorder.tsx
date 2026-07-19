@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { transcriptIsExact, transcriptScore } from "./speechAssessment";
+import { transcriptIsExact } from "./speechAssessment";
 
 type OralRecorderProps = {
   target: string;
@@ -58,6 +58,10 @@ declare global {
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
+
+function studentFeedback(feedback: string | undefined, fallback: string) {
+  return feedback && !feedback.includes("%") ? feedback : fallback;
+}
 
 function joinedTranscript(current: string, next: string) {
   return `${current} ${next}`.trim();
@@ -467,15 +471,14 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
         onResult?.(false);
         return;
       }
-      const score = transcriptScore(target, transcript);
       if (transcriptIsExact(target, transcript)) {
         setStatus("passed");
-        setMessage("Hebat! Semua perkataan dibaca dengan tepat (100%).");
+        setMessage("Hebat! Semua perkataan dibaca dengan tepat.");
         onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
-        setMessage(`Saya dengar “${transcript}”. Ketepatan ${score}%, tetapi semua perkataan mesti betul. Cuba lagi.`);
+        setMessage(`Saya dengar “${transcript}”. Ada perkataan yang belum tepat. Cuba baca setiap perkataan sekali lagi.`);
         onResult?.(false);
       }
       return;
@@ -497,12 +500,12 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
         : result.accuracy === 100;
       if (result.passed && exact) {
         setStatus("passed");
-        setMessage(result.feedback ?? "Hebat! Semua perkataan dibaca dengan tepat (100%).");
+        setMessage(studentFeedback(result.feedback, "Hebat! Semua perkataan dibaca dengan tepat."));
         onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
-        setMessage(result.feedback ?? "Belum tepat. Semua perkataan mesti dibaca dengan betul dan mengikut urutan.");
+        setMessage(studentFeedback(result.feedback, "Belum tepat. Semua perkataan mesti dibaca dengan betul dan mengikut urutan."));
         onResult?.(false);
       }
     } catch {
@@ -568,7 +571,7 @@ export default function OralRecorder({ target, modelAudio, onSuccess, onResult, 
             {recordingPlaying ? "Sedang dengar…" : "Dengar rakaman"}
           </button>
           <div className="self-check-actions">
-            <button className="mini-button" type="button" onClick={retry}>Cuba lagi</button>
+            <button className="mini-button" type="button" onClick={retry} disabled={status === "passed"}>Cuba lagi</button>
             <button className="primary-action compact" type="button" onClick={assess} disabled={status === "checking" || status === "passed"}>
               {status === "checking" ? "Menyemak…" : "Semak bacaan"}
             </button>

@@ -11,7 +11,7 @@ type Assessment = {
   feedback?: string;
 };
 
-type TracingFailure = "outside" | "incomplete" | "shape" | null;
+type TracingFailure = "outside" | "incomplete" | "painted" | "shape" | null;
 
 type HandwritingCanvasProps = {
   target: string;
@@ -22,6 +22,10 @@ type HandwritingCanvasProps = {
 
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
 const TARGET_FONT_FAMILY = '"Andika", sans-serif';
+
+function studentFeedback(feedback: string | undefined, fallback: string) {
+  return feedback && !feedback.includes("%") ? feedback : fallback;
+}
 
 function targetFont(fontSize: number) {
   return `700 ${fontSize}px ${TARGET_FONT_FAMILY}`;
@@ -94,6 +98,82 @@ function strokePathLength(strokes: Stroke[]) {
   }, 0);
 }
 
+function strokeMotionStats(strokes: Stroke[], widestCharacterWidth: number) {
+  const visitedCells = new Set<string>();
+  let cellVisits = 0;
+  let crossCharacterStrokes = 0;
+  let longStraightStrokes = 0;
+  let longStrokes = 0;
+  let turnbacks = 0;
+
+  strokes.forEach((stroke) => {
+    if (stroke.length < 2) return;
+    let length = 0;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    const directions: number[] = [];
+    let directionAnchor = stroke[0];
+    let previousCell = "";
+
+    for (let index = 0; index < stroke.length; index += 1) {
+      const point = stroke[index];
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      if (index > 0) {
+        const previous = stroke[index - 1];
+        const segmentLength = Math.hypot(point.x - previous.x, point.y - previous.y);
+        length += segmentLength;
+        const sampleCount = Math.max(1, Math.ceil(segmentLength / 3));
+        for (let sample = 1; sample <= sampleCount; sample += 1) {
+          const ratio = sample / sampleCount;
+          const x = previous.x + (point.x - previous.x) * ratio;
+          const y = previous.y + (point.y - previous.y) * ratio;
+          const cell = `${Math.floor(x / 6)}:${Math.floor(y / 6)}`;
+          if (cell !== previousCell) {
+            previousCell = cell;
+            cellVisits += 1;
+            visitedCells.add(cell);
+          }
+        }
+      }
+      const directionDistance = Math.hypot(point.x - directionAnchor.x, point.y - directionAnchor.y);
+      if (directionDistance >= 7) {
+        directions.push(Math.atan2(point.y - directionAnchor.y, point.x - directionAnchor.x));
+        directionAnchor = point;
+      }
+    }
+
+    for (let index = 1; index < directions.length; index += 1) {
+      const difference = Math.abs(Math.atan2(
+        Math.sin(directions[index] - directions[index - 1]),
+        Math.cos(directions[index] - directions[index - 1]),
+      ));
+      if (difference > 2.35) turnbacks += 1;
+    }
+
+    if (length >= 18) {
+      longStrokes += 1;
+      const first = stroke[0];
+      const last = stroke[stroke.length - 1];
+      const directness = Math.hypot(last.x - first.x, last.y - first.y) / length;
+      if (directness > 0.9) longStraightStrokes += 1;
+    }
+    if (maxX - minX > widestCharacterWidth * 1.65 && length > widestCharacterWidth * 1.8) {
+      crossCharacterStrokes += 1;
+    }
+  });
+
+  const pathLength = strokePathLength(strokes);
+  return {
+    crossCharacterStrokes,
+    pathLength,
+    revisitRatio: cellVisits > 0 ? 1 - visitedCells.size / cellVisits : 1,
+    straightStrokeRatio: longStrokes > 0 ? longStraightStrokes / longStrokes : 0,
+    strokeCount: strokes.filter((stroke) => strokePathLength([stroke]) >= 3).length,
+    turnbacks,
+  };
+}
+
 function tracingScore(target: string, strokes: Stroke[], width: number, height: number, fontSize: number) {
   const makeCanvas = () => {
     const canvas = document.createElement("canvas");
@@ -148,7 +228,6 @@ function tracingScore(target: string, strokes: Stroke[], width: number, height: 
   const precision = inkTotal > 0 ? inkInside / inkTotal : 0;
   const coverage = targetTotal > 0 ? targetCovered / targetTotal : 0;
   const inkRatio = targetTotal > 0 ? inkTotal / targetTotal : Number.POSITIVE_INFINITY;
-  const pathInkRatio = targetTotal > 0 ? (strokePathLength(strokes) * 7) / targetTotal : Number.POSITIVE_INFINITY;
 
   const boundsPadding = Math.max(8, fontSize * 0.14);
   let inkOutsideBounds = 0;
@@ -172,10 +251,12 @@ function tracingScore(target: string, strokes: Stroke[], width: number, height: 
   measurementContext.font = targetFont(fontSize);
   const textStartX = width / 2 - measurementContext.measureText(target).width / 2;
   const characterCoverages: number[] = [];
+  const characterWidths: number[] = [];
   for (let characterIndex = 0; characterIndex < target.length; characterIndex += 1) {
     if (/\s/u.test(target[characterIndex])) continue;
     const left = Math.max(0, Math.floor(textStartX + measurementContext.measureText(target.slice(0, characterIndex)).width));
     const right = Math.min(width - 1, Math.ceil(textStartX + measurementContext.measureText(target.slice(0, characterIndex + 1)).width));
+    characterWidths.push(right - left);
     let characterTotal = 0;
     let characterCovered = 0;
     for (let y = 0; y < height; y += 1) {
@@ -191,6 +272,17 @@ function tracingScore(target: string, strokes: Stroke[], width: number, height: 
   const weakestCharacterCoverage = characterCoverages.length > 0
     ? Math.min(...characterCoverages)
     : 0;
+  const characterCount = Math.max(1, characterCoverages.length);
+  const widestCharacterWidth = Math.max(fontSize * 0.32, ...characterWidths);
+  const motion = strokeMotionStats(strokes, widestCharacterWidth);
+  const pathInkRatio = targetTotal > 0 ? (motion.pathLength * 7) / targetTotal : Number.POSITIVE_INFINITY;
+  const overdrawRatio = inkTotal > 0 ? (motion.pathLength * 7) / inkTotal : Number.POSITIVE_INFINITY;
+  const looksPainted = motion.strokeCount > characterCount * 3 + 2
+    || motion.revisitRatio > 0.42
+    || motion.turnbacks > characterCount * 2 + 4
+    || overdrawRatio > 1.75
+    || motion.crossCharacterStrokes > Math.max(1, Math.floor(characterCount / 5))
+    || (motion.strokeCount > characterCount * 1.5 && motion.straightStrokeRatio > 0.72);
   const score = Math.round((precision * 0.5 + coverage * 0.35 + weakestCharacterCoverage * 0.15) * 100);
   const hasExtraInk = precision < 0.82
     || outsideBoundsRatio > 0.035
@@ -199,10 +291,23 @@ function tracingScore(target: string, strokes: Stroke[], width: number, height: 
   const isIncomplete = inkTotal < Math.max(70, targetTotal * 0.18)
     || coverage < 0.52
     || weakestCharacterCoverage < 0.4;
-  const passed = !hasExtraInk && !isIncomplete && score >= 67;
+  const passed = !looksPainted && !hasExtraInk && !isIncomplete && score >= 67;
   let failure: TracingFailure = null;
   if (!passed) {
-    failure = hasExtraInk ? "outside" : isIncomplete ? "incomplete" : "shape";
+    failure = looksPainted ? "painted" : hasExtraInk ? "outside" : isIncomplete ? "incomplete" : "shape";
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.info("handwriting-check", {
+      characterCount,
+      coverage: Number(coverage.toFixed(3)),
+      failure,
+      inkRatio: Number(inkRatio.toFixed(3)),
+      overdrawRatio: Number(overdrawRatio.toFixed(3)),
+      pathInkRatio: Number(pathInkRatio.toFixed(3)),
+      precision: Number(precision.toFixed(3)),
+      ...motion,
+    });
   }
 
   return {
@@ -282,6 +387,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   };
 
   const startDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (status === "passed") return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     drawing.current = true;
@@ -291,7 +397,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   };
 
   const continueDrawing = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawing.current) return;
+    if (!drawing.current || status === "passed") return;
     event.preventDefault();
     const context = prepareContext();
     if (!context) return;
@@ -317,6 +423,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   };
 
   const clear = () => {
+    if (status === "passed") return;
     setStrokes([]);
     setStatus("idle");
     setMessage("");
@@ -324,6 +431,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   };
 
   const undo = () => {
+    if (status === "passed") return;
     setStrokes((existing) => existing.slice(0, -1));
     setStatus("idle");
     setMessage("");
@@ -331,6 +439,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   };
 
   const checkWriting = async () => {
+    if (status === "passed") return;
     const canvas = canvasRef.current;
     if (!canvas || strokes.length === 0) {
       setMessage("Tulis dahulu, kemudian tekan Semak.");
@@ -344,6 +453,8 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
       setStatus("retry");
       setMessage(localResult.failure === "outside"
         ? "Ada tulisan tambahan atau garisan di luar bayang. Padam dan tulis perkataan itu sahaja."
+        : localResult.failure === "painted"
+          ? "Jangan warnakan atau gosok bayang. Tulis setiap huruf mengikut gerakan pensel."
         : localResult.failure === "incomplete"
           ? "Belum lengkap. Ikut bayang bagi setiap huruf, kemudian cuba lagi."
           : "Bentuk tulisan belum sepadan. Cuba ikut bayang huruf dengan lebih tepat.");
@@ -353,7 +464,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
 
     if (!ASSESS_API_BASE) {
       setStatus("passed");
-      setMessage(`Bagus! Bentuk tulisan sepadan (${localResult.score}%).`);
+      setMessage("Bagus! Bentuk tulisan sepadan.");
       onResult?.(true);
       onSuccess();
       return;
@@ -371,17 +482,17 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
       const result = (await response.json()) as Assessment;
       if (result.passed) {
         setStatus("passed");
-        setMessage(result.feedback ?? "Bagus! Tulisan kamu dapat dibaca.");
+        setMessage(studentFeedback(result.feedback, "Bagus! Tulisan kamu dapat dibaca."));
         onResult?.(true);
         onSuccess();
       } else {
         setStatus("retry");
-        setMessage(result.feedback ?? "Cuba tulis sekali lagi dengan lebih jelas.");
+        setMessage(studentFeedback(result.feedback, "Cuba tulis sekali lagi dengan lebih jelas."));
         onResult?.(false);
       }
     } catch {
       setStatus("passed");
-      setMessage(`Bagus! Bentuk tulisan sepadan (${localResult.score}%).`);
+      setMessage("Bagus! Bentuk tulisan sepadan.");
       onResult?.(true);
       onSuccess();
     }
@@ -397,8 +508,9 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
       <div className="ink-frame">
         <canvas
           ref={canvasRef}
-          className="ink-canvas"
+          className={`ink-canvas ${status === "passed" ? "locked" : ""}`}
           aria-label="Ruang menulis dengan jari atau pen digital"
+          aria-disabled={status === "passed"}
           onPointerDown={startDrawing}
           onPointerMove={continueDrawing}
           onPointerUp={finishDrawing}
@@ -406,18 +518,20 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
           onContextMenu={(event) => event.preventDefault()}
           onDragStart={(event) => event.preventDefault()}
         />
+        <div className="ink-scroll-zone zone-top" aria-hidden="true" />
+        <div className="ink-scroll-zone zone-bottom" aria-hidden="true" />
         <div className="writing-lines" aria-hidden="true" />
         <span className="ink-hint" style={{ fontSize: `${guideFontSize}px` }} aria-hidden="true">{target}</span>
       </div>
 
       <div className="tool-actions">
-        <button className="mini-button" type="button" onClick={undo} disabled={strokes.length === 0}>
+        <button className="mini-button" type="button" onClick={undo} disabled={strokes.length === 0 || status === "passed"}>
           Undur
         </button>
-        <button className="mini-button" type="button" onClick={clear} disabled={strokes.length === 0}>
+        <button className="mini-button" type="button" onClick={clear} disabled={strokes.length === 0 || status === "passed"}>
           Padam
         </button>
-        <button className="primary-action compact" type="button" onClick={checkWriting} disabled={status === "checking"}>
+        <button className="primary-action compact" type="button" onClick={checkWriting} disabled={status === "checking" || status === "passed"}>
           {status === "checking" ? "Menyemak…" : "Semak tulisan"}
         </button>
       </div>
