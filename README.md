@@ -6,7 +6,7 @@ Audio murid menggunakan fail MP3 tetap daripada satu suara `ms-MY-YasminNeural` 
 
 Murid boleh memilih laluan `Dengar`, `Baca` atau `Tulis`, atau memilih cabaran campuran 10/15 soalan dengan markah dan pecahan kemahiran. Laluan `Dengar` merangkumi pilihan, susunan, isi tempat kosong dan padanan audio. Laluan `Baca` merakam suara, menyediakan butang main semula yang jelas dan menggunakan pengecaman pertuturan `ms-MY` pada pelayar yang menyokongnya. Semua perkataan mesti sepadan mengikut urutan untuk lulus; satu perkataan yang salah, tertinggal atau ditambah tidak boleh mendapat pengesahan 100%.
 
-Tulisan dinilai pada peranti dengan panduan jejak bentuk huruf. Contengan yang tidak meliputi bentuk sasaran ditolak dan maklum balas lulus/cuba lagi dipaparkan terus. Untuk penilaian pertuturan atau OCR tulisan yang seragam pada semua pelayar, `NEXT_PUBLIC_ASSESS_API_BASE` boleh disambungkan kepada perkhidmatan penilaian selamat; kunci API tidak boleh disimpan dalam laman GitHub Pages.
+Tulisan dinilai pada peranti dengan panduan jejak bentuk huruf. Setiap huruf mesti diliputi, manakala contengan, tulisan tambahan, garisan di luar sasaran dan jumlah pen berlebihan akan ditolak. Maklum balas khusus dipaparkan terus. Untuk penilaian pertuturan atau OCR tulisan bebas yang seragam pada semua pelayar, `NEXT_PUBLIC_ASSESS_API_BASE` boleh disambungkan kepada perkhidmatan penilaian selamat; kunci API tidak boleh disimpan dalam laman GitHub Pages.
 
 Saluran laporan cabaran telah disediakan tetapi tidak aktif secara lalai. Tetapkan `NEXT_PUBLIC_REPORT_ENDPOINT` untuk menerima keputusan JSON dan/atau `NEXT_PUBLIC_REPORT_DASHBOARD_URL` untuk memaparkan pautan laporan. Tanpa tetapan itu, tiada butang laporan, akaun atau penyimpanan data dipaparkan kepada murid.
 

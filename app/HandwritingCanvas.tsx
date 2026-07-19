@@ -11,6 +11,8 @@ type Assessment = {
   feedback?: string;
 };
 
+type TracingFailure = "outside" | "incomplete" | "shape" | null;
+
 type HandwritingCanvasProps = {
   target: string;
   onSuccess: () => void;
@@ -19,6 +21,18 @@ type HandwritingCanvasProps = {
 };
 
 const ASSESS_API_BASE = process.env.NEXT_PUBLIC_ASSESS_API_BASE?.replace(/\/$/, "") ?? "";
+const TARGET_FONT_FAMILY = '"Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
+
+function targetFont(fontSize: number) {
+  return `950 ${fontSize}px ${TARGET_FONT_FAMILY}`;
+}
+
+function fittedTargetFontSize(context: CanvasRenderingContext2D, target: string, width: number) {
+  const maximumSize = 78;
+  context.font = targetFont(maximumSize);
+  const measuredWidth = Math.max(1, context.measureText(target).width);
+  return Math.max(26, Math.min(maximumSize, (maximumSize * Math.max(180, width - 36)) / measuredWidth));
+}
 
 function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke) {
   if (stroke.length === 0) return;
@@ -52,19 +66,32 @@ function drawTargetMask(
   width: number,
   height: number,
   fontSize: number,
-  expanded: boolean,
+  expansionWidth = 0,
 ) {
-  context.font = `950 ${fontSize}px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif`;
+  context.font = targetFont(fontSize);
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillStyle = "#000";
-  if (expanded) {
+  if (expansionWidth > 0) {
     context.lineJoin = "round";
-    context.lineWidth = Math.max(20, fontSize * 0.38);
+    context.lineWidth = expansionWidth;
     context.strokeStyle = "#000";
     context.strokeText(target, width / 2, height / 2 + 2);
   }
   context.fillText(target, width / 2, height / 2 + 2);
+}
+
+function strokePathLength(strokes: Stroke[]) {
+  return strokes.reduce((total, stroke) => {
+    let strokeLength = 0;
+    for (let index = 1; index < stroke.length; index += 1) {
+      strokeLength += Math.hypot(
+        stroke[index].x - stroke[index - 1].x,
+        stroke[index].y - stroke[index - 1].y,
+      );
+    }
+    return total + strokeLength;
+  }, 0);
 }
 
 function tracingScore(target: string, strokes: Stroke[], width: number, height: number, fontSize: number) {
@@ -75,47 +102,113 @@ function tracingScore(target: string, strokes: Stroke[], width: number, height: 
     return canvas;
   };
   const targetCore = makeCanvas();
-  const targetZone = makeCanvas();
+  const targetTolerance = makeCanvas();
   const inkCore = makeCanvas();
-  const inkZone = makeCanvas();
-  drawTargetMask(targetCore.getContext("2d")!, target, width, height, fontSize, false);
-  drawTargetMask(targetZone.getContext("2d")!, target, width, height, fontSize, true);
+  const inkCoverage = makeCanvas();
+  const toleranceWidth = Math.max(11, fontSize * 0.22);
+  const coverageWidth = Math.max(13, fontSize * 0.24);
+  drawTargetMask(targetCore.getContext("2d")!, target, width, height, fontSize);
+  drawTargetMask(targetTolerance.getContext("2d")!, target, width, height, fontSize, toleranceWidth);
   drawInkMask(inkCore.getContext("2d")!, strokes, 7);
-  drawInkMask(inkZone.getContext("2d")!, strokes, Math.max(20, fontSize * 0.3));
+  drawInkMask(inkCoverage.getContext("2d")!, strokes, coverageWidth);
 
   const coreTargetPixels = targetCore.getContext("2d")!.getImageData(0, 0, width, height).data;
-  const zoneTargetPixels = targetZone.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const toleranceTargetPixels = targetTolerance.getContext("2d")!.getImageData(0, 0, width, height).data;
   const coreInkPixels = inkCore.getContext("2d")!.getImageData(0, 0, width, height).data;
-  const zoneInkPixels = inkZone.getContext("2d")!.getImageData(0, 0, width, height).data;
+  const coverageInkPixels = inkCoverage.getContext("2d")!.getImageData(0, 0, width, height).data;
   let inkTotal = 0;
   let inkInside = 0;
   let targetTotal = 0;
   let targetCovered = 0;
+  let targetMinX = width;
+  let targetMaxX = 0;
+  let targetMinY = height;
+  let targetMaxY = 0;
 
   for (let offset = 3; offset < coreInkPixels.length; offset += 4) {
+    const pixelIndex = (offset - 3) / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
     const ink = coreInkPixels[offset] > 40;
     const targetPixel = coreTargetPixels[offset] > 40;
     if (ink) {
       inkTotal += 1;
-      if (zoneTargetPixels[offset] > 40) inkInside += 1;
+      if (toleranceTargetPixels[offset] > 40) inkInside += 1;
     }
     if (targetPixel) {
       targetTotal += 1;
-      if (zoneInkPixels[offset] > 40) targetCovered += 1;
+      if (coverageInkPixels[offset] > 40) targetCovered += 1;
+      targetMinX = Math.min(targetMinX, x);
+      targetMaxX = Math.max(targetMaxX, x);
+      targetMinY = Math.min(targetMinY, y);
+      targetMaxY = Math.max(targetMaxY, y);
     }
   }
 
   const precision = inkTotal > 0 ? inkInside / inkTotal : 0;
   const coverage = targetTotal > 0 ? targetCovered / targetTotal : 0;
-  const score = Math.round((precision * 0.48 + coverage * 0.52) * 100);
+  const inkRatio = targetTotal > 0 ? inkTotal / targetTotal : Number.POSITIVE_INFINITY;
+  const pathInkRatio = targetTotal > 0 ? (strokePathLength(strokes) * 7) / targetTotal : Number.POSITIVE_INFINITY;
+
+  const boundsPadding = Math.max(8, fontSize * 0.14);
+  let inkOutsideBounds = 0;
+  for (let offset = 3; offset < coreInkPixels.length; offset += 4) {
+    if (coreInkPixels[offset] <= 40) continue;
+    const pixelIndex = (offset - 3) / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    if (
+      x < targetMinX - boundsPadding
+      || x > targetMaxX + boundsPadding
+      || y < targetMinY - boundsPadding
+      || y > targetMaxY + boundsPadding
+    ) {
+      inkOutsideBounds += 1;
+    }
+  }
+  const outsideBoundsRatio = inkTotal > 0 ? inkOutsideBounds / inkTotal : 1;
+
+  const measurementContext = targetCore.getContext("2d")!;
+  measurementContext.font = targetFont(fontSize);
+  const textStartX = width / 2 - measurementContext.measureText(target).width / 2;
+  const characterCoverages: number[] = [];
+  for (let characterIndex = 0; characterIndex < target.length; characterIndex += 1) {
+    if (/\s/u.test(target[characterIndex])) continue;
+    const left = Math.max(0, Math.floor(textStartX + measurementContext.measureText(target.slice(0, characterIndex)).width));
+    const right = Math.min(width - 1, Math.ceil(textStartX + measurementContext.measureText(target.slice(0, characterIndex + 1)).width));
+    let characterTotal = 0;
+    let characterCovered = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = left; x <= right; x += 1) {
+        const offset = (y * width + x) * 4 + 3;
+        if (coreTargetPixels[offset] <= 40) continue;
+        characterTotal += 1;
+        if (coverageInkPixels[offset] > 40) characterCovered += 1;
+      }
+    }
+    if (characterTotal > 0) characterCoverages.push(characterCovered / characterTotal);
+  }
+  const weakestCharacterCoverage = characterCoverages.length > 0
+    ? Math.min(...characterCoverages)
+    : 0;
+  const score = Math.round((precision * 0.5 + coverage * 0.35 + weakestCharacterCoverage * 0.15) * 100);
+  const hasExtraInk = precision < 0.82
+    || outsideBoundsRatio > 0.035
+    || inkRatio > 1.2
+    || pathInkRatio > 1.65;
+  const isIncomplete = inkTotal < Math.max(70, targetTotal * 0.18)
+    || coverage < 0.52
+    || weakestCharacterCoverage < 0.4;
+  const passed = !hasExtraInk && !isIncomplete && score >= 67;
+  let failure: TracingFailure = null;
+  if (!passed) {
+    failure = hasExtraInk ? "outside" : isIncomplete ? "incomplete" : "shape";
+  }
+
   return {
-    passed: inkTotal >= Math.max(70, targetTotal * 0.055)
-      && precision >= 0.52
-      && coverage >= 0.42
-      && score >= 54,
+    passed,
     score,
-    precision,
-    coverage,
+    failure,
   };
 }
 
@@ -126,7 +219,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [status, setStatus] = useState<"idle" | "checking" | "passed" | "retry">("idle");
   const [message, setMessage] = useState("");
-  const guideFontSize = Math.max(30, Math.min(78, 260 / Math.max(3, target.length * 0.56)));
+  const [guideFontSize, setGuideFontSize] = useState(48);
 
   const prepareContext = useCallback(() => {
     const canvas = canvasRef.current;
@@ -161,6 +254,8 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
       canvas.width = Math.floor(width * ratio);
       canvas.height = Math.floor(height * ratio);
       canvas.style.height = `${height}px`;
+      const context = canvas.getContext("2d");
+      if (context) setGuideFontSize(fittedTargetFontSize(context, target, width));
       redraw();
     };
 
@@ -168,7 +263,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [redraw]);
+  }, [redraw, target]);
 
   useEffect(() => {
     redraw();
@@ -237,7 +332,11 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
     const localResult = tracingScore(target, strokes, width, height, guideFontSize);
     if (!localResult.passed) {
       setStatus("retry");
-      setMessage("Belum tepat. Cuba ikut bayang setiap huruf dengan lebih lengkap.");
+      setMessage(localResult.failure === "outside"
+        ? "Ada tulisan tambahan atau garisan di luar bayang. Padam dan tulis perkataan itu sahaja."
+        : localResult.failure === "incomplete"
+          ? "Belum lengkap. Ikut bayang bagi setiap huruf, kemudian cuba lagi."
+          : "Bentuk tulisan belum sepadan. Cuba ikut bayang huruf dengan lebih tepat.");
       onResult?.(false);
       return;
     }
