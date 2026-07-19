@@ -35,4 +35,4 @@ npm install
 npm run dev
 ```
 
-<!-- deployment: mobile-handwriting -->
+<!-- deployment: schoolbook-font -->
