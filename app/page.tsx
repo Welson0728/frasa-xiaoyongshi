@@ -784,11 +784,11 @@ function GameScreen({
           {question.kind === "listen-match" && <ListenMatchActivity question={question} locked={feedback?.kind === "correct"} onComplete={() => markCorrect("Semua suara dipadankan dengan tepat.")} onWrong={() => markWrong("Suara dan ayat itu belum sepadan.")} onInteract={() => setFeedback(null)} />}
 
           {question.kind === "write" && (
-            <><h2 className="question-prompt tool-prompt">{question.prompt}</h2><HandwritingCanvas target={question.target} onSuccess={() => markCorrect("Tulisan kamu mengikut bentuk huruf dengan tepat.")} onResult={(passed) => { if (!passed) markWrong("Tulisan belum mengikut bentuk huruf dengan tepat."); }} onReset={() => setFeedback(null)} /></>
+            <><h2 className="question-prompt tool-prompt">{question.prompt}</h2><HandwritingCanvas target={question.target} onSuccess={() => markCorrect("Tulisan kamu mengikut bentuk huruf dengan tepat.")} onResult={(passed) => { if (!passed) markWrong("Tulisan belum mengikut bentuk huruf dengan tepat."); }} onReset={() => { if (!questionResolvedRef.current) setFeedback(null); }} /></>
           )}
 
           {question.kind === "oral" && (
-            <><h2 className="question-prompt tool-prompt">{question.prompt}</h2><OralRecorder target={question.target} modelAudio={question.modelAudio} onSuccess={() => markCorrect("Semua perkataan dibaca dengan tepat.")} onResult={(passed) => { if (!passed) markWrong("Bacaan belum 100% tepat. Cuba setiap perkataan sekali lagi."); }} onReset={() => setFeedback(null)} /></>
+            <><h2 className="question-prompt tool-prompt">{question.prompt}</h2><OralRecorder target={question.target} modelAudio={question.modelAudio} onSuccess={() => markCorrect("Semua perkataan dibaca dengan tepat.")} onResult={(passed) => { if (!passed) markWrong("Bacaan belum tepat. Cuba setiap perkataan sekali lagi."); }} onReset={() => { if (!questionResolvedRef.current) setFeedback(null); }} /></>
           )}
         </div>
 
