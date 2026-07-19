@@ -6,6 +6,7 @@ const { audioManifest, generatedBankStats, questionBank } = require("/tmp/jom-ma
 const errors = [];
 const questionIds = new Set();
 const audioFiles = new Set();
+const protectedSentenceTerms = ["Guan Hong", "Zhi Ying", "Cikgu Wong", "Pulau Redang"];
 
 if (curriculumUnits.length !== 24) errors.push(`Expected 24 units, found ${curriculumUnits.length}.`);
 if (generatedBankStats.total !== 336) errors.push(`Expected 336 activities, found ${generatedBankStats.total}.`);
@@ -24,6 +25,13 @@ for (const question of questionBank) {
   }
   if (question.kind === "order" && question.words.join(" ") !== question.answer) {
     errors.push(`${question.id} cannot be reconstructed from its word tokens.`);
+  }
+  if (question.kind === "order") {
+    for (const term of protectedSentenceTerms) {
+      if (question.answer.includes(term) && !question.words.some((word) => word.includes(term))) {
+        errors.push(`${question.id} splits the protected term “${term}”.`);
+      }
+    }
   }
 }
 

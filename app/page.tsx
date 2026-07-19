@@ -9,7 +9,7 @@ import {
   type GameQuestion,
   type OrderQuestion,
   modeLabels,
-  pickQuestion,
+  questionBank,
   shuffled,
 } from "./questions";
 
@@ -17,6 +17,49 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 type Feedback = { kind: "correct" | "wrong"; text: string } | null;
 type WordToken = { id: string; label: string };
+type LearningPath = "listen" | "read" | "write" | "mixed";
+
+const learningPaths: Array<{
+  id: Exclude<LearningPath, "mixed">;
+  title: string;
+  description: string;
+  mode: GameMode;
+}> = [
+  {
+    id: "listen",
+    title: "Dengar",
+    description: "Dengar suara dan pilih jawapan",
+    mode: "listen",
+  },
+  {
+    id: "read",
+    title: "Baca",
+    description: "Baca kuat, rakam dan semak suara",
+    mode: "oral",
+  },
+  {
+    id: "write",
+    title: "Tulis",
+    description: "Tulis terus dengan jari atau pen",
+    mode: "write",
+  },
+];
+
+const pathModes: Record<LearningPath, readonly GameMode[]> = {
+  listen: ["listen"],
+  read: ["oral"],
+  write: ["write"],
+  mixed: ["listen", "read", "language", "order", "write", "oral"],
+};
+
+function pickPathQuestion(path: LearningPath, recentIds: readonly string[] = []): GameQuestion {
+  const allowedModes = new Set(pathModes[path]);
+  const pathBank = questionBank.filter((item) => allowedModes.has(item.mode));
+  const recent = new Set(recentIds);
+  const unseen = pathBank.filter((item) => !recent.has(item.id));
+  const pool = unseen.length > 0 ? unseen : pathBank;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 const dust = Array.from({ length: 18 }, (_, index) => index);
 const confetti = Array.from({ length: 20 }, (_, index) => index);
@@ -41,23 +84,73 @@ function AmbientScene() {
   );
 }
 
-function ModeMark({ mode }: { mode: GameMode }) {
-  if (mode === "listen") {
-    return <span className="mode-mark listen-mark" aria-hidden="true"><i /><i /><i /><i /><i /></span>;
+function CartoonMark({ kind }: { kind: "listen" | "read" | "write" }) {
+  if (kind === "listen") {
+    return (
+      <span className="cartoon-mark cartoon-listen" aria-hidden="true">
+        <i className="headphone-band" />
+        <i className="buddy-head">
+          <b className="buddy-eye eye-left" />
+          <b className="buddy-eye eye-right" />
+          <b className="buddy-mouth" />
+        </i>
+        <i className="earpad earpad-left" />
+        <i className="earpad earpad-right" />
+        <i className="music-note">♪</i>
+      </span>
+    );
   }
-  if (mode === "read") {
-    return <span className="mode-mark read-mark" aria-hidden="true"><i /><i /></span>;
+  if (kind === "read") {
+    return (
+      <span className="cartoon-mark cartoon-book" aria-hidden="true">
+        <i className="book-page book-left" />
+        <i className="book-page book-right" />
+        <i className="book-spine" />
+        <b className="buddy-eye eye-left" />
+        <b className="buddy-eye eye-right" />
+        <b className="buddy-mouth" />
+        <i className="book-spark">✦</i>
+      </span>
+    );
   }
-  if (mode === "language") {
-    return <span className="mode-mark letter-mark" aria-hidden="true">Aa</span>;
-  }
-  if (mode === "order") {
-    return <span className="mode-mark order-mark" aria-hidden="true"><i /><i /><i /></span>;
-  }
-  if (mode === "write") {
-    return <span className="mode-mark write-mark" aria-hidden="true"><i /></span>;
-  }
-  return <span className="mode-mark oral-mark" aria-hidden="true"><i /><b /></span>;
+  return (
+    <span className="cartoon-mark cartoon-pencil" aria-hidden="true">
+      <i className="pencil-eraser" />
+      <i className="pencil-body">
+        <b className="buddy-eye eye-left" />
+        <b className="buddy-eye eye-right" />
+        <b className="buddy-mouth" />
+      </i>
+      <i className="pencil-wood" />
+      <i className="pencil-tip" />
+      <i className="pencil-spark">✦</i>
+    </span>
+  );
+}
+
+function CartoonStickers() {
+  return (
+    <div className="cartoon-stickers" aria-hidden="true">
+      <span className="sticker-star">
+        <i className="sticker-eye eye-left" />
+        <i className="sticker-eye eye-right" />
+        <i className="sticker-smile" />
+      </span>
+      <span className="sticker-cloud">
+        <i className="sticker-eye eye-left" />
+        <i className="sticker-eye eye-right" />
+        <i className="sticker-smile" />
+        <b>✦</b>
+      </span>
+      <span className="sticker-letter">Aa<i /><i /></span>
+    </div>
+  );
+}
+
+function cartoonKindForMode(mode: GameMode): "listen" | "read" | "write" {
+  if (mode === "listen") return "listen";
+  if (mode === "read" || mode === "oral") return "read";
+  return "write";
 }
 
 function ConfettiBurst() {
@@ -69,10 +162,11 @@ function ConfettiBurst() {
   );
 }
 
-function HomeScreen({ onStart }: { onStart: () => void }) {
+function HomeScreen({ onStart }: { onStart: (path: LearningPath) => void }) {
   return (
     <main className="app-shell home-screen">
       <AmbientScene />
+      <CartoonStickers />
       <div className="top-brand"><span className="brand-gem" />Bahasa Melayu <b>Tahun 2</b></div>
 
       <section className="hero-panel" aria-labelledby="hero-title">
@@ -81,16 +175,34 @@ function HomeScreen({ onStart }: { onStart: () => void }) {
           <span className="title-shadow" aria-hidden="true">Jom Main</span>
           <h1 id="hero-title">Jom Main<br /><strong>Bahasa!</strong></h1>
         </div>
-        <p className="hero-copy">Dengar, baca, susun, tulis dan sebut. Setiap permainan membawa cabaran baharu.</p>
+        <p className="hero-copy">Pilih cara kamu mahu belajar. Setiap pilihan membawa cabaran baharu.</p>
 
-        <button className="start-button" type="button" onClick={onStart}>
-          <span className="start-face"><i className="play-triangle" />Mula Bermain</span>
-          <span className="start-depth" aria-hidden="true" />
-        </button>
-
-        <div className="skill-ribbon" aria-label="Kemahiran: dengar, baca, tulis dan sebut">
-          <span>Dengar</span><i /><span>Baca</span><i /><span>Tulis</span><i /><span>Sebut</span>
+        <div className="path-grid" aria-label="Pilih cara belajar">
+          {learningPaths.map((path) => (
+            <button
+              className={`path-card path-${path.id}`}
+              type="button"
+              key={path.id}
+              onClick={() => onStart(path.id)}
+            >
+              <span className="path-depth" aria-hidden="true" />
+              <span className="path-face">
+                <span className="path-icon"><CartoonMark kind={path.id} /></span>
+                <span className="path-copy">
+                  <strong>{path.title}</strong>
+                  <small>{path.description}</small>
+                </span>
+                <span className="path-arrow" aria-hidden="true">›</span>
+              </span>
+            </button>
+          ))}
         </div>
+
+        <button className="mixed-button" type="button" onClick={() => onStart("mixed")}>
+          <span className="mixed-stars" aria-hidden="true"><i /><i /><i /></span>
+          <span><strong>Campur Semua</strong><small>Pelbagai cabaran secara rawak</small></span>
+          <b aria-hidden="true">›</b>
+        </button>
         <p className="no-account-note">Tekan dan terus bermain · Tiada akaun diperlukan</p>
       </section>
 
@@ -253,8 +365,8 @@ function FeedbackPanel({ feedback, onNext }: { feedback: Feedback; onNext: () =>
   );
 }
 
-function GameScreen({ onExit }: { onExit: () => void }) {
-  const [question, setQuestion] = useState<GameQuestion>(() => pickQuestion());
+function GameScreen({ path, onExit }: { path: LearningPath; onExit: () => void }) {
+  const [question, setQuestion] = useState<GameQuestion>(() => pickPathQuestion(path));
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [wrongAnswers, setWrongAnswers] = useState<string[]>([]);
@@ -263,7 +375,9 @@ function GameScreen({ onExit }: { onExit: () => void }) {
   const [selectedWords, setSelectedWords] = useState<string[]>([]);
   const [activityKey, setActivityKey] = useState(0);
   const cardRef = useRef<HTMLElement>(null);
-  const labels = modeLabels[question.mode];
+  const labels = question.mode === "oral"
+    ? { ...modeLabels[question.mode], eyebrow: "Baca" }
+    : modeLabels[question.mode];
 
   const showQuestion = (next: GameQuestion) => {
     setQuestion(next);
@@ -277,7 +391,7 @@ function GameScreen({ onExit }: { onExit: () => void }) {
 
   const nextQuestion = () => {
     const updatedRecent = [...recentIds, question.id].slice(-30);
-    const next = pickQuestion(updatedRecent);
+    const next = pickPathQuestion(path, updatedRecent);
     setRecentIds(updatedRecent);
     showQuestion(next);
   };
@@ -333,7 +447,7 @@ function GameScreen({ onExit }: { onExit: () => void }) {
     <main className={`app-shell game-screen accent-${labels.accent}`}>
       <AmbientScene />
       <header className="game-header">
-        <button className="home-button" type="button" onClick={onExit} aria-label="Kembali ke halaman utama">
+        <button className="home-button" type="button" onClick={onExit} aria-label="Tukar pilihan latihan">
           <span /><span />
         </button>
         <div className="game-brand"><span className="brand-gem" />Bahasa Melayu <b>Tahun 2</b></div>
@@ -349,7 +463,7 @@ function GameScreen({ onExit }: { onExit: () => void }) {
         <div className="card-edge" aria-hidden="true" />
         <div className="card-glow" aria-hidden="true" />
         <div className="challenge-heading">
-          <div className="mode-orb"><ModeMark mode={question.mode} /></div>
+          <div className="mode-orb"><CartoonMark kind={cartoonKindForMode(question.mode)} /></div>
           <div>
             <span>{labels.eyebrow}</span>
             <h1>{labels.title}</h1>
@@ -394,7 +508,11 @@ function GameScreen({ onExit }: { onExit: () => void }) {
           {question.kind === "write" && (
             <>
               <h2 className="question-prompt tool-prompt">{question.prompt}</h2>
-              <HandwritingCanvas target={question.target} onSuccess={() => completeTool("Kamu sudah menulis dan menyemaknya.")} />
+              <HandwritingCanvas
+                target={question.target}
+                onSuccess={() => completeTool("Tulisan kamu telah disemak dengan tepat.")}
+                onContinue={nextQuestion}
+              />
             </>
           )}
 
@@ -413,6 +531,8 @@ function GameScreen({ onExit }: { onExit: () => void }) {
 }
 
 export default function Home() {
-  const [playing, setPlaying] = useState(false);
-  return playing ? <GameScreen onExit={() => setPlaying(false)} /> : <HomeScreen onStart={() => setPlaying(true)} />;
+  const [selectedPath, setSelectedPath] = useState<LearningPath | null>(null);
+  return selectedPath
+    ? <GameScreen key={selectedPath} path={selectedPath} onExit={() => setSelectedPath(null)} />
+    : <HomeScreen onStart={setSelectedPath} />;
 }
