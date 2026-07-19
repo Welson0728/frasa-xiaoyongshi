@@ -34,3 +34,5 @@ https://welson0728.github.io/frasa-xiaoyongshi/
 npm install
 npm run dev
 ```
+
+<!-- deployment: android-reading -->
