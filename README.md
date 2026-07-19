@@ -35,4 +35,4 @@ npm install
 npm run dev
 ```
 
-<!-- deployment: android-reading -->
+<!-- deployment: mobile-handwriting -->
