@@ -35,4 +35,4 @@ npm install
 npm run dev
 ```
 
-<!-- deployment: schoolbook-font -->
+<!-- deployment: strict-writing-flow -->
