@@ -28,10 +28,10 @@ function targetFont(fontSize: number) {
 }
 
 function fittedTargetFontSize(context: CanvasRenderingContext2D, target: string, width: number) {
-  const maximumSize = 78;
+  const maximumSize = 104;
   context.font = targetFont(maximumSize);
   const measuredWidth = Math.max(1, context.measureText(target).width);
-  return Math.max(26, Math.min(maximumSize, (maximumSize * Math.max(180, width - 36)) / measuredWidth));
+  return Math.max(34, Math.min(maximumSize, (maximumSize * Math.max(220, width - 20)) / measuredWidth));
 }
 
 function drawStroke(context: CanvasRenderingContext2D, stroke: Stroke) {
@@ -250,7 +250,7 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
     const resize = () => {
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(280, Math.floor(canvas.getBoundingClientRect().width));
-      const height = window.matchMedia("(max-width: 560px)").matches ? 230 : 270;
+      const height = window.matchMedia("(max-width: 560px)").matches ? 300 : 290;
       canvas.width = Math.floor(width * ratio);
       canvas.height = Math.floor(height * ratio);
       canvas.style.height = `${height}px`;
@@ -304,6 +304,9 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
     const finished = currentStroke.current;
     currentStroke.current = [];
     if (finished.length > 0) setStrokes((existing) => [...existing, finished]);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const clear = () => {
@@ -393,6 +396,8 @@ export default function HandwritingCanvas({ target, onSuccess, onResult, onReset
           onPointerMove={continueDrawing}
           onPointerUp={finishDrawing}
           onPointerCancel={finishDrawing}
+          onContextMenu={(event) => event.preventDefault()}
+          onDragStart={(event) => event.preventDefault()}
         />
         <div className="writing-lines" aria-hidden="true" />
         <span className="ink-hint" style={{ fontSize: `${guideFontSize}px` }} aria-hidden="true">{target}</span>
